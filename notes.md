@@ -7,7 +7,8 @@ We do not enforce control over which CPU or which cache is used. So, we acknowle
 absolute numbers, we are only interested in the relative trends as to how the performance changes when there is cache hit vs cache miss , difference in performance seen with changes in 
 data layout etc.
 
-Compiler flags:
+Compiler flags :
+
 For this project, we typically add a few compiler flags to benchmark the differences between memory access patterns properly without the m2 cpu playing tricks
 1. O2 - optimized enough to remove artifacts, but not aggressive enough like O3 to unroll loops, remove entire loops etc.
 2. no-vectorize - compiler's auto vectorization of loops is disabled to prevent it interfering with our analyses. 
@@ -15,6 +16,7 @@ For this project, we typically add a few compiler flags to benchmark the differe
 To prevent the compiler from removing loops or dead code, we also volatile where required.
 
 Warmup :
+
 In our code studying memory access patterns, we include warm-up code which pushes the machine's CPU to a steady-state, so that we get the steady-state runtime and not cold start runtime. The warm-up does many things, it allows the OS to populate page tables, page faults, TLB entries are created etc. Also, the hardware pre-fetchers are hot, caches are active and do not need to be warmed up during the computations. this specially affects the sequential access pattern code. Also, this helps power stabilization and the cpu to reach a steady clock frequency starting from usually lower frequency. 
 
 Random vs Sequential memory access pattern raw results : 
@@ -26,6 +28,7 @@ shuffled indices.
 The benchmark results were collected for 4 values of N keeping it in line with the approximate estimated cache size available and code was executed for 5 times
 and the result was estimated.
 
+```
 N : 128 kb
 
 Sequential                          Random
@@ -54,7 +57,7 @@ Sum = 35184367894528                Sum = 35184367894528
 Min = 0.00483                       Min = 0.02142
 Max = 0.00577                       Max = 0.02264
 Avg = 0.00506                       Avg = 0.02190
-
+```
 Observations and inferences from the experiment :
 
 1. Our l1 data cache is 64 kb and l2 cache is around 2 MB. with the dataset being 128 kb, for both random and sequential access, the data does not fit in 
