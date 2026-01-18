@@ -1,3 +1,5 @@
+Project 1 - Sequential vs Random access patterns
+
 Important points to remember :
 
 Upon getting hw data from the computer, we see that the code and benchmark is done on Apple m2 silicon which uses arm64 architecture. 
