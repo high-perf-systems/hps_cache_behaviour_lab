@@ -1,183 +1,94 @@
-Project 2 — Stride, Cache Lines, and Hardware Prefetchers
+# Experiment 2: Stride, Cache Lines, and Hardware Prefetchers
 
-Objective
+## Objective
 
-The goal of this experiment is to understand what “sequential access” means to a modern CPU, and more importantly, when and why it stops helping.
+This experiment aims to deconstruct the meaning of "sequential access" from a modern CPU's perspective. By systematically increasing the memory access stride while keeping the total memory footprint constant, we can identify when and why the benefits of sequential access diminish. The goal is to observe how the system bottleneck shifts from CPU execution to cache bandwidth, and finally to address translation (TLB) limits.
 
-This project studies how changing the stride of memory access—while keeping the total memory footprint constant—affects performance, and how the system bottleneck shifts across:
+## Experimental Setup
 
-CPU execution limits
+### Hardware and Environment
 
-Cache bandwidth limits
+The benchmarks were executed on Apple M2 silicon (ARM64 architecture), which features:
 
-Address translation (TLB) limits
+-   **Heterogeneous Cores:** A mix of Performance-cores (P-cluster) and Efficiency-cores (E-cluster).
+-   **System Level Cache (SLC):** A shared cache for all cores.
 
-Experimental Context
+As with the previous experiment, we do not control core selection. Therefore, the analysis focuses on *relative performance trends* rather than absolute timings.
 
-Similar to Project 1, we do not enforce control over:
+### Compiler Configuration
 
-Which CPU core executes the program
+To isolate the effects of memory access, the following compiler flags were used:
 
-Whether execution happens on performance or efficiency cores (Apple Silicon)
+-   `-O2`: Standard optimizations without aggressive, potentially confounding transformations.
+-   `-fno-vectorize`: Disables automatic loop vectorization (SIMD).
+-   `-fno-slp-vectorize`: Disables superword-level parallelism.
+-   `volatile`: Prevents dead-code elimination.
 
-Apple Silicon has heterogeneous cores (P-cluster and E-cluster) with different frequency limits and cache structures.
-Absolute timings are therefore not meaningful across runs or devices.
+### Experimental Invariants
 
-The focus is strictly on:
+To ensure a clean and fair experiment, the following conditions were maintained:
 
-Relative performance trends within the same execution environment.
+1.  **Constant Memory Footprint:** The total number of bytes accessed is the same for all stride values.
+2.  **Controlled Compiler Behavior:** Vectorization and dead-code elimination are disabled.
+3.  **Warm-up Phase:** A warm-up period is used to mitigate cold-start effects in caches and TLBs.
+4.  **Averaged Results:** Multiple iterations are run, and the results are averaged to reduce noise.
 
-Compiler Configuration and Rationale
+## Experiment Description
 
-The compiler can significantly distort microbenchmarks if not constrained carefully.
-We use the following flags:
+The benchmark iterates over a large array, summing its elements. The stride of access is varied across the set {1, 2, 4, 8, 16, 32, 64, 128}. All other parameters are held constant.
 
--O2
-Optimized enough to remove artifacts, but avoids aggressive transformations such as excessive unrolling or speculative restructuring seen in -O3.
+## Results
 
--fno-vectorize
-Disables automatic loop vectorization to prevent SIMD from masking memory effects.
+| Stride | Time (s)     |
+| :----- | :----------- |
+| 1      | 0.0109287    |
+| 2      | 0.00971154   |
+| 4      | 0.00979238   |
+| 8      | 0.00965863   |
+| 16     | 0.0171271    |
+| 32     | 0.0403845    |
+| 64     | 0.0384875    |
+| 128    | 0.0378612    |
 
--fno-slp-vectorize
-Disables superword-level parallelism for the same reason.
+## Analysis and Inferences
 
-Additionally:
+### Strides 1, 2, 4, 8: The CPU-Bound Regime
 
-volatile is used where necessary to prevent dead-code elimination.
+At small strides, the accesses are confined to a single or adjacent cache lines.
 
-A warm-up phase is included to bring caches, TLBs, and page tables into a steady state.
+-   **Efficient Cache Usage:** Cache lines are reused effectively.
+-   **Predictable Access:** Hardware prefetchers work perfectly.
+-   **High TLB Hit Rate:** The TLB hit rate is near 100%.
+-   **Data in L1/L2:** Data is almost always available in the L1 or L2 cache.
 
-Experimental Invariants (Non-Negotiable)
+In this regime, the system bottleneck is the **CPU's execution throughput**, not memory access. The slightly higher runtime for a stride of 1 is likely due to instruction retirement pressure or load/store queue contention, not a memory issue.
 
-To ensure the experiment is uncontaminated:
+### Stride 16: The Cache Bandwidth-Bound Transition
 
-1. Constant memory footprint
-All stride values must touch the same total number of bytes.
+At a stride of 16, a transition occurs:
 
-2. Controlled compiler behavior
-No vectorization, no dead-code elimination.
+-   **Reduced Cache Line Utilization:** Each access uses only a fraction of the fetched cache line.
+-   **Increased Bandwidth Demand:** While latency is still hidden by prefetching, the demand on L1/L2 cache bandwidth increases significantly as more cache lines are fetched.
+-   **LFB Saturation:** The Line Fill Buffers (LFBs), which handle outstanding cache misses, may become saturated.
 
-3. Warm-up phase
-Avoid cold-start effects in caches and TLBs.
+This marks the shift from a CPU-bound to a **cache-bandwidth-bound** workload.
 
-4. Multiple iterations
-Average results are used instead of relying on single measurements.
+### Strides ≥ 32: The TLB and Memory-Subsystem Bound Regime
 
-Experiment Description : 
+At larger strides, the performance bottleneck shifts again:
 
-In stride.cpp, we iterate over a large array using increasing strides : stride ∈ {1, 2, 4, 8, 16, 32, 64, 128}
-All other parameters are kept constant.
+-   **TLB Misses:** Each access is more likely to fall on a new virtual page, exceeding the TLB's capacity and causing frequent TLB misses.
+-   **Page Table Walks:** Each TLB miss triggers a costly page table walk, which involves multiple memory accesses.
 
-```
-Stride = 1   Time = 0.0109287
-Stride = 2   Time = 0.00971154
-Stride = 4   Time = 0.00979238
-Stride = 8   Time = 0.00965863
-Stride = 16  Time = 0.0171271
-Stride = 32  Time = 0.0403845
-Stride = 64  Time = 0.0384875
-Stride = 128 Time = 0.0378612
-```
+The dominant cost is no longer cache-line utilization but **address translation latency**. The CPU spends an increasing amount of time stalled, waiting for the memory management unit (MMU) to translate virtual to physical addresses.
 
-Analysis and Inferences
+## Key Takeaways
 
-Stride = 1, 2, 4, 8 → CPU-Bound Regime
+1.  **Sequential access is not a monolithic concept.** Its benefits degrade as different subsystems (CPU, cache, MMU) become the bottleneck.
+2.  **Performance collapses in distinct phases:** from CPU-bound to cache-bandwidth-bound, and finally to TLB/memory-bound.
+3.  **Bandwidth and buffer exhaustion often precede latency issues.** Performance breaks due to saturated buffers (like LFBs) or translation overhead before raw DRAM latency becomes the primary problem.
+4.  **Holistic system reasoning is crucial.** Optimizing one part of the system in isolation can lead to incorrect conclusions.
 
-These strides fall within a single cache line or nearby cache lines.
+## Final Insight
 
-Key observations:
-
-Cache lines are reused efficiently
-
-Hardware prefetchers accurately predict access patterns
-
-TLB hit rate is effectively 100%
-
-Data is almost always available in L1/L2
-
-The system bottleneck here is CPU execution throughput, not memory.
-
-The slightly higher runtime for stride = 1 compared to 2/4/8 is likely due to:
-
-Higher instruction retirement pressure
-
-Load/store queue utilization
-
-Backend execution limits
-
-This is not a memory problem.
-
-Stride = 16 → Cache Bandwidth-Bound Transition
-
-At stride = 16:
-
-Each cache line contains many elements, but only one is used
-
-Cache line utilization drops sharply
-
-Hardware prefetchers still fetch aggressively
-
-Latency is mostly hidden
-
-However:
-
-L1/L2 bandwidth demand increases
-
-Line Fill Buffers (LFBs) become saturated
-
-Cache hierarchy throughput becomes the limiting factor
-
-This marks the transition from CPU-bound to cache-bandwidth-bound execution.
-
-Stride ≥ 32 → TLB and Memory-Subsystem Bound
-
-At higher strides:
-
-Each access frequently touches a new virtual page
-
-TLB capacity is exceeded
-
-TLB misses become common
-
-Page table walks are triggered
-
-Important distinction:
-
-The dominant cost is no longer cache-line utilization
-
-The dominant cost is address translation latency and serialization
-
-Each page walk:
-
-Consumes memory bandwidth
-
-Pollutes caches
-
-Stalls dependent loads
-
-The CPU increasingly stalls waiting for valid physical addresses, leading to a sharp performance collapse.
-
-Key Takeaways
-
-Sequential access is not binary
-It helps until a specific subsystem becomes the bottleneck.
-
-Performance collapses in phases
-
-CPU execution limits
-
-Cache bandwidth saturation
-
-TLB and page walk overheads
-
-Latency is not the first failure mode
-Bandwidth and buffer exhaustion usually break performance before raw latency becomes visible.
-
-Systems must be reasoned about holistically
-Optimizing one layer while ignoring others leads to incorrect conclusions.
-
-Final Insight
-
-This experiment reinforces a core systems principle:
-
-Performance tuning is bottleneck hunting, not micro-optimization.
+This experiment reinforces a core principle of systems performance engineering: **performance tuning is about identifying and alleviating bottlenecks, not about micro-optimization.**

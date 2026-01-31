@@ -1,0 +1,13 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "C/C++ Runner: Debug Session",
+      "type": "lldb",
+      "request": "launch",
+      "args": [],
+      "cwd": "/Users/divyeshkanagavel/Desktop/repos/hps_cache_behaviour_lab/exp3_AoSvSoA/src",
+      "program": "/Users/divyeshkanagavel/Desktop/repos/hps_cache_behaviour_lab/exp3_AoSvSoA/src/build/Debug/outDebug"
+    }
+  ]
+}

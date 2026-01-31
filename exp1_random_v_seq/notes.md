@@ -1,75 +1,82 @@
-Project 1 - Sequential vs Random access patterns
+# Experiment 1: Sequential vs. Random Memory Access
 
-Important points to remember :
+## Objective
 
-Upon getting hw data from the computer, we see that the code and benchmark is done on Apple m2 silicon which uses arm64 architecture. 
-there are some nuances associated with the m2 silicon, the cache is not a traditional hierarchy like the x86 systems. there is a slc (system level cache) and l1, l2 caches. 
-Also, the CPU cores are split into efficiency cores (E-cluster) and Performance cores (P-cluster) each of which have different frequency limits. 
-We do not enforce control over which CPU or which cache is used. So, we acknowledge that the results are not completely reproducible every time. we are not interested in the 
-absolute numbers, we are only interested in the relative trends as to how the performance changes when there is cache hit vs cache miss , difference in performance seen with changes in 
-data layout etc.
+This experiment investigates the performance implications of sequential versus random memory access patterns. The goal is to understand how cache hierarchies, hardware prefetchers, and memory subsystems interact with different access patterns, and how performance characteristics change as the data set size grows.
 
-Compiler flags :
+## Experimental Setup
 
-For this project, we typically add a few compiler flags to benchmark the differences between memory access patterns properly without the m2 cpu playing tricks
-1. O2 - optimized enough to remove artifacts, but not aggressive enough like O3 to unroll loops, remove entire loops etc.
-2. no-vectorize - compiler's auto vectorization of loops is disabled to prevent it interfering with our analyses. 
-3. no-slp-vectorize - compiler's superword level parallelism disabled.
-To prevent the compiler from removing loops or dead code, we also volatile where required.
+### Hardware and Environment
 
-Warmup :
+The benchmarks were executed on Apple M2 silicon (ARM64 architecture). Key characteristics of this platform include:
 
-In our code studying memory access patterns, we include warm-up code which pushes the machine's CPU to a steady-state, so that we get the steady-state runtime and not cold start runtime. The warm-up does many things, it allows the OS to populate page tables, page faults, TLB entries are created etc. Also, the hardware pre-fetchers are hot, caches are active and do not need to be warmed up during the computations. this specially affects the sequential access pattern code. Also, this helps power stabilization and the cpu to reach a steady clock frequency starting from usually lower frequency. 
+-   **Heterogeneous Cores:** The CPU comprises both Performance-cores (P-cluster) and Efficiency-cores (E-cluster).
+-   **System Level Cache (SLC):** A shared cache for all cores.
+-   **Non-traditional Cache Hierarchy:** The L1/L2 cache structure differs from typical x86 systems.
 
-Random vs Sequential memory access pattern raw results : 
+Due to the lack of fine-grained control over core selection and cache usage, the absolute performance numbers are not the focus. Instead, this analysis emphasizes the *relative performance trends* between the two access patterns.
 
-In both the scenarios, the objective was to compute the sum of numbers from 0 to N. In sequential access, the sum was computed iterating from indices 0 to N,
-sequentially whereas in the case of random access pattern, the indices were shuffled using a random number generator algorithm and summation iterated over the 
-shuffled indices.
+### Compiler Configuration
 
-The benchmark results were collected for 4 values of N keeping it in line with the approximate estimated cache size available and code was executed for 5 times
-and the result was estimated.
+To ensure a fair comparison and prevent compiler optimizations from obscuring the memory access behavior, the following flags were used:
 
-```
-N : 128 kb
+-   `-O2`: Provides a good balance of optimization without aggressive loop transformations (like unrolling) that could alter the access patterns.
+-   `-fno-vectorize`: Disables auto-vectorization.
+-   `-fno-slp-vectorize`: Disables superword-level parallelism.
+-   `volatile`: Used where necessary to prevent the compiler from optimizing away loops or memory accesses.
 
-Sequential                          Random
-Sum = 134209536                     Sum = 134209536
-Min = 1.4708 e^-5                   Min = 1.7708 e^-5
-Max = 1.8917 e^-5                   Max = 2.133 e^-5
-Avg = 1.6866 e^-5                   Avg = 1,9998 e^-5
+### Warm-up Phase
 
-N : 2 MB
-Sequential                          Random 
-Sum = 34359607296                   Sum = 34359607296 
-Min = 0.00020195                    Min = 0.0004025
-Max = 0.00029004                    Max = 0.000447125
-Avg = 0.00025207                    Avg = 0.00042508
+A warm-up phase is included in the benchmark code to ensure the system reaches a steady state before measurements are taken. This helps to:
 
-N : 8MB
-Sequential                          Random 
-Sum = 549755289600                  Sum = 549755289600 
-Min = 0.000796458                   Min = 0.0011705
-Max = 0.00122488                    Max = 0.001976
-Avg = 0.00104155                    Avg = 0.001592
+-   Populate page tables and TLB entries.
+-   Activate hardware prefetchers.
+-   Allow the CPU to reach a stable clock frequency.
 
-N : 64MB
-Sequential                          Random 
-Sum = 35184367894528                Sum = 35184367894528 
-Min = 0.00483                       Min = 0.02142
-Max = 0.00577                       Max = 0.02264
-Avg = 0.00506                       Avg = 0.02190
-```
-Observations and inferences from the experiment :
+## Experiment Description
 
-1. Our l1 data cache is 64 kb and l2 cache is around 2 MB. with the dataset being 128 kb, for both random and sequential access, the data does not fit in 
-l1 cache. but they both fit in l2 cache. So, there is no need to touch DRAM and Translation lookup buffer is not pressurised much to read the physical memory mapping from the virtual memory. page table entries are already done and there is no need to disturb them. The interesting idea here is that random access is not always slow, if the cache size is ample,both sequential and random give the same performance. Cache size matters more than pattern alone.
+The experiment calculates the sum of a large array of numbers. Two scenarios were tested:
 
-2. With N = 2MB , we overflow L2 cache and within the limits of L3 cache. the random access pattern is 2x slower than sequential. We are now stressing L3 cache, TLB capacity, hardware prefetchers. Sequential is faster because, hardware prefetchers have already fetched data, cache lines are fully utilized and there is very little TLB misses. In the case of random access, the TLB misses are high, thus page walks are required to be performed and this causes delay. prefetcher is mostly useless, and all this is due to poor spatial locality.
+1.  **Sequential Access:** The array is traversed linearly from index 0 to N.
+2.  **Random Access:** The array indices are shuffled, and the array is traversed using the shuffled indices.
 
-3. with N = 8MB, we see a 1.5 x speedup of sequential pattern over random. in this case, for both the cases, the memory perhaps slightly exceeds the l3 cache. both the patterns suffer misses since they exceed cache sizes. DRAM  latency dominates and hence even with the sequential pattern, the advantage is diluted due to DRAM latency dominance. 
+The benchmarks were run for several values of `N`, chosen to be in line with the estimated cache sizes of the test machine.
 
-4. N = 64MB, here we see a whopping 4x speedup of sequential pattern over random in spite of 64 MB clearly exceeding the cache sizes. The advantage of spatial locality is no more limited to the caches alone. the speedup is due to multiple factors. hardware prefetching works better with spatial locality. the hardware prefetchers request memory early and keep them ready. with sequential pattern, this can be used, but with random access pattern, the prefetched memory is discarded. each access stalls. Even when getting memory from DRAM, sequential access reuses DRAM rows and there are fewer activations. in case of random access, there is row thrashing, high DRAM penalty. TLB thrashing : TLB usually has 100-300 entries , with sequential access, the TLB stores the mapping of next 100-300 entries and these can be reused. but with random access, the TLB entries cannot be reused and they need to be updated with every new index requested. page walks are more common in random access. Memory Level Parallelism (MLP) also plays a role here, it is the mechanism by which a processor sends multiple memory requests concurrently. it needs some hardware enablers to work properly, like look ahead of registers etc. with sequential access, the misses are predictable and thus the cpu can pipeline loads, but with random access, the misses are unpredictable, the cpu cannot pipeline load and thus slows down.
+## Results
 
-Conclusions from experiment 1 : 
-The experiment demonstrates that memory access performance is governed not only by cache capacity but by a combination of spatial locality, hardware prefetching effectiveness, TLB behavior, and DRAM-level locality. Sequential access patterns benefit from prefetching and predictable page access even when the working set exceeds cache sizes, leading to near-linear scaling. Random access patterns degrade sharply once working sets exceed cache and TLB capacities, causing increased TLB misses, page table walks, and inefficient DRAM access.
+The following table summarizes the minimum, maximum, and average execution times for both access patterns across different data set sizes.
+
+| Data Size (N) | Access Pattern | Min Time (s)  | Max Time (s)  | Avg Time (s)  |
+| :------------ | :------------- | :------------ | :------------ | :------------ |
+| **128 KB**    | Sequential     | 1.4708e-05    | 1.8917e-05    | 1.6866e-05    |
+|               | Random         | 1.7708e-05    | 2.133e-05     | 1.9998e-05    |
+| **2 MB**      | Sequential     | 0.00020195    | 0.00029004    | 0.00025207    |
+|               | Random         | 0.0004025     | 0.000447125   | 0.00042508    |
+| **8 MB**      | Sequential     | 0.000796458   | 0.00122488    | 0.00104155    |
+|               | Random         | 0.0011705     | 0.001976      | 0.001592      |
+| **64 MB**     | Sequential     | 0.00483       | 0.00577       | 0.00506       |
+|               | Random         | 0.02142       | 0.02264       | 0.02190       |
+
+## Analysis and Inferences
+
+1.  **N = 128 KB:** The data set is larger than the L1 data cache (64 KB) but fits within the L2 cache. Both access patterns exhibit similar performance because the data resides entirely in the cache, and there is no need to access DRAM. This demonstrates that when the working set fits in a lower-level cache, the access pattern has a minimal impact.
+
+2.  **N = 2 MB:** The data set overflows the L2 cache, stressing the L3 cache and the Translation Lookaside Buffer (TLB). The random access pattern is approximately **2x slower** than the sequential pattern. This is due to:
+    -   **Hardware Prefetcher Inefficiency:** The prefetcher cannot predict the next memory access for the random pattern.
+    -   **Poor Spatial Locality:** Cache lines are not fully utilized.
+    -   **TLB Misses:** The random access pattern leads to a higher rate of TLB misses, requiring more frequent and costly page table walks.
+
+3.  **N = 8 MB:** The sequential pattern is about **1.5x faster** than the random pattern. Both patterns now exceed the L3 cache size, and DRAM latency becomes a more significant factor for both. The advantage of sequential access is somewhat diluted because both patterns are now frequently accessing main memory.
+
+4.  **N = 64 MB:** The sequential pattern is a significant **4x faster** than the random pattern. Even though the data set is much larger than the cache, the benefits of spatial locality extend to the DRAM subsystem:
+    -   **Hardware Prefetching:** The prefetcher continues to be effective for the sequential pattern, hiding some of the DRAM latency.
+    -   **DRAM Row Locality:** Sequential access patterns are more likely to hit open DRAM rows, reducing activation penalties. Random accesses can cause "row thrashing."
+    -   **TLB Efficiency:** The TLB is more effective for sequential access, as it can cache translations for contiguous pages. Random access leads to TLB thrashing and frequent page walks.
+    -   **Memory-Level Parallelism (MLP):** The CPU can pipeline memory requests more effectively for the predictable sequential access pattern, hiding latency. This is not possible for the unpredictable random access pattern.
+
+## Conclusion
+
+This experiment demonstrates that memory access performance is a complex interplay of cache capacity, spatial locality, hardware prefetching, TLB behavior, and DRAM characteristics.
+
+-   **Sequential access** scales well, even when the data set exceeds cache sizes, due to the benefits of hardware prefetching and locality at both the cache and DRAM levels.
+-   **Random access** performance degrades sharply when the working set exceeds the cache and TLB capacities. This is primarily due to TLB thrashing, inefficient prefetching, and poor DRAM locality.
